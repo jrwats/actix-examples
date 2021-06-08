@@ -1,7 +1,5 @@
 //! Simple echo websocket server.
 //! Open `http://localhost:8080/index.html` in browser
-//! or [python console client](https://github.com/actix/examples/blob/master/websocket/websocket-client.py)
-//! could be used for testing.
 
 use std::time::{Duration, Instant};
 
@@ -15,11 +13,7 @@ use serde_json::{json, Result as JsonResult, Value};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-<<<<<<< HEAD
 const ENQ_INTERVAL: Duration = Duration::from_secs(2);
-=======
-const ENQ_INTERVAL: Duration = Duration::from_secs(5);
->>>>>>> 1a938b0e050835f7b9741b7c49af8756e70b36c4
 /// How long before lack of client response causes a timeout
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -31,14 +25,7 @@ async fn ws_index(r: HttpRequest, stream: web::Payload) -> Result<HttpResponse, 
     res
 }
 
-<<<<<<< HEAD
 pub fn get_timestamp_ns() -> u64 { Utc::now().timestamp_subsec_nanos() as u64}
-=======
-pub fn get_unix_timestamp_us() -> i64 {
-    let now = Utc::now();
-    now.timestamp_nanos()
-}
->>>>>>> 1a938b0e050835f7b9741b7c49af8756e70b36c4
 
 // #[derive(Serialize, Deserialize, Debug)]
 // struct Enq {
@@ -109,7 +96,6 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
 impl MyWebSocket {
     fn new() -> Self {
         Self { hb_instant: Instant::now() }
-<<<<<<< HEAD
     }
 
     fn send_enq(ctx: &mut <Self as Actor>::Context) {
@@ -123,18 +109,6 @@ impl MyWebSocket {
         MyWebSocket::send_enq(ctx);
         ctx.run_interval(ENQ_INTERVAL, |_act, ctx| {
             MyWebSocket::send_enq(ctx);
-=======
-    }
-
-    /// helper method that sends ping to client every second.
-    ///
-    /// also this method checks heartbeats from client
-    fn on_start(&self, ctx: &mut <Self as Actor>::Context) {
-        ctx.run_interval(ENQ_INTERVAL, |_act, ctx| {
-            let enq = json!({"kind": "enq", "timestamp": get_unix_timestamp_us()});
-            ctx.text(enq.to_string());
-            println!("Send ENQ");
->>>>>>> 1a938b0e050835f7b9741b7c49af8756e70b36c4
         });
 
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
@@ -160,7 +134,6 @@ impl MyWebSocket {
             let ack = json!({ "type": "ack", "timestamp": val["timestamp"]});
             ctx.text(ack.to_string());
         } else if val["kind"] == "ack" {
-<<<<<<< HEAD
             assert!(val["timestamp"].is_u64());
             let now = get_timestamp_ns();
             let then = val["timestamp"].as_u64().unwrap();
@@ -169,12 +142,6 @@ impl MyWebSocket {
 
             let ms = delta as f64 / 1_000_000.0;
             println!("delta: {}ms", ms);
-=======
-            assert!(val["timestamp"].is_i64());
-            // match val["timestamp"].as_i64();
-            let delta = get_unix_timestamp_us() - val["timestamp"].as_i64().unwrap();
-            println!("latency: {:?}", delta);
->>>>>>> 1a938b0e050835f7b9741b7c49af8756e70b36c4
         } else {
             println!("Unknown message: {}", text);
         }
