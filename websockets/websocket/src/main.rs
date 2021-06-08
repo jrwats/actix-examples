@@ -9,6 +9,8 @@ use actix::prelude::*;
 use actix_files as fs;
 use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
+use chrono::prelude::*;
+use serde::{Serialize, Deserialize};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -23,12 +25,29 @@ async fn ws_index(r: HttpRequest, stream: web::Payload) -> Result<HttpResponse, 
     res
 }
 
+pub fn get_unix_timestamp_us() -> i64 {
+    let now = Utc::now();
+    now.timestamp_nanos()
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Enq {
+    kind: String,
+    timestamp: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Ack {
+    kind: String,
+    timestamp: i64,
+}
+
 /// websocket connection is long running connection, it easier
 /// to handle with an actor
 struct MyWebSocket {
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT),
     /// otherwise we drop connection.
-    hb: Instant,
+    heartbeat: Instant,
 }
 
 impl Actor for MyWebSocket {
@@ -36,7 +55,7 @@ impl Actor for MyWebSocket {
 
     /// Method is called on actor start. We start the heartbeat process here.
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.hb(ctx);
+        self.heartbeat(ctx);
     }
 }
 
@@ -51,13 +70,21 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
         println!("WS: {:?}", msg);
         match msg {
             Ok(ws::Message::Ping(msg)) => {
-                self.hb = Instant::now();
+                self.heartbeat = Instant::now();
                 ctx.pong(&msg);
             }
             Ok(ws::Message::Pong(_)) => {
-                self.hb = Instant::now();
+                self.heartbeat = Instant::now();
             }
-            Ok(ws::Message::Text(text)) => ctx.text(text),
+            Ok(ws::Message::Text(text)) => {
+                // match serde::from_string(text) {
+                //     OK(val) => {
+                //     },
+                //     Error(e0) => {
+                //     },
+                // }
+                ctx.text(text);
+            }
             Ok(ws::Message::Binary(bin)) => ctx.binary(bin),
             Ok(ws::Message::Close(reason)) => {
                 ctx.close(reason);
@@ -70,16 +97,16 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
 
 impl MyWebSocket {
     fn new() -> Self {
-        Self { hb: Instant::now() }
+        Self { heartbeat: Instant::now() }
     }
 
     /// helper method that sends ping to client every second.
     ///
     /// also this method checks heartbeats from client
-    fn hb(&self, ctx: &mut <Self as Actor>::Context) {
+    fn heartbeat(&self, ctx: &mut <Self as Actor>::Context) {
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
             // check client heartbeats
-            if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
+            if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
                 // heartbeat timed out
                 println!("Websocket Client heartbeat failed, disconnecting!");
 

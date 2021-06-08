@@ -20,5 +20,8 @@ actix-web-actors = "3"
 actix-files = "0.3"
 awc = "2"
 env_logger = "0.8"
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 futures = "0.3.1"
 bytes = "0.5.3"
