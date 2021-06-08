@@ -22,6 +22,19 @@
           update_ui();
         };
         conn.onmessage = function(e) {
+          try {
+            const msg = JSON.parse(e.data);
+            console.log(msg);
+            if (msg.kind == 'enq') {
+              conn.send(JSON.stringify({kind: 'ack', timestamp: msg.timestamp}));
+              return;
+            } else if (msg.kind == 'latency') {
+              console.log(`latency: ${msg.latency / 1000000.0}ms`);
+              return;
+            }
+          } catch (e) {
+            console.warn(e);
+          }
           log('Received: ' + e.data);
         };
         conn.onclose = function() {

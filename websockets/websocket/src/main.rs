@@ -10,10 +10,12 @@ use actix_files as fs;
 use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use chrono::prelude::*;
-use serde::{Serialize, Deserialize};
+// use serde::{Serialize, Deserialize};
+use serde_json::{json, Result as JsonResult, Value};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const ENQ_INTERVAL: Duration = Duration::from_secs(2);
 /// How long before lack of client response causes a timeout
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -25,29 +27,26 @@ async fn ws_index(r: HttpRequest, stream: web::Payload) -> Result<HttpResponse, 
     res
 }
 
-pub fn get_unix_timestamp_us() -> i64 {
-    let now = Utc::now();
-    now.timestamp_nanos()
-}
+pub fn get_timestamp_ns() -> u64 { Utc::now().timestamp_subsec_nanos() as u64}
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Enq {
-    kind: String,
-    timestamp: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Ack {
-    kind: String,
-    timestamp: i64,
-}
+// #[derive(Serialize, Deserialize, Debug)]
+// struct Enq {
+//     kind: String,
+//     timestamp: i64,
+// }
+//
+// #[derive(Serialize, Deserialize, Debug)]
+// struct Ack {
+//     kind: String,
+//     timestamp: i64,
+// }
 
 /// websocket connection is long running connection, it easier
 /// to handle with an actor
 struct MyWebSocket {
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT),
     /// otherwise we drop connection.
-    heartbeat: Instant,
+    hb_instant: Instant,
 }
 
 impl Actor for MyWebSocket {
@@ -55,7 +54,7 @@ impl Actor for MyWebSocket {
 
     /// Method is called on actor start. We start the heartbeat process here.
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.heartbeat(ctx);
+        self.on_start(ctx);
     }
 }
 
@@ -67,22 +66,24 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
         ctx: &mut Self::Context,
     ) {
         // process websocket messages
-        println!("WS: {:?}", msg);
+        // println!("WS: {:?}", msg);
         match msg {
             Ok(ws::Message::Ping(msg)) => {
-                self.heartbeat = Instant::now();
+                self.hb_instant = Instant::now();
                 ctx.pong(&msg);
             }
             Ok(ws::Message::Pong(_)) => {
-                self.heartbeat = Instant::now();
+                self.hb_instant = Instant::now();
             }
             Ok(ws::Message::Text(text)) => {
-                // match serde::from_string(text) {
-                //     OK(val) => {
-                //     },
-                //     Error(e0) => {
-                //     },
-                // }
+                match self.ack_handler(&text, ctx) {
+                    Ok(_) => {
+                        return;
+                    }
+                    Err(e) => {
+                        println!("Error: {}", e);
+                    }
+                }
                 ctx.text(text);
             }
             Ok(ws::Message::Binary(bin)) => ctx.binary(bin),
@@ -97,16 +98,25 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWebSocket {
 
 impl MyWebSocket {
     fn new() -> Self {
-        Self { heartbeat: Instant::now() }
+        Self { hb_instant: Instant::now() }
     }
 
-    /// helper method that sends ping to client every second.
-    ///
-    /// also this method checks heartbeats from client
-    fn heartbeat(&self, ctx: &mut <Self as Actor>::Context) {
+    fn send_enq(ctx: &mut <Self as Actor>::Context) {
+        let enq = json!({"kind": "enq", "timestamp": get_timestamp_ns()});
+        ctx.text(enq.to_string());
+    }
+
+    /// Helper method that sends ENQ to client every N seconds.
+    /// This method checks heartbeats from client
+    fn on_start(&self, ctx: &mut <Self as Actor>::Context) {
+        MyWebSocket::send_enq(ctx);
+        ctx.run_interval(ENQ_INTERVAL, |_act, ctx| {
+            MyWebSocket::send_enq(ctx);
+        });
+
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
             // check client heartbeats
-            if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
+            if Instant::now().duration_since(act.hb_instant) > CLIENT_TIMEOUT {
                 // heartbeat timed out
                 println!("Websocket Client heartbeat failed, disconnecting!");
 
@@ -120,6 +130,27 @@ impl MyWebSocket {
             ctx.ping(b"");
         });
     }
+
+    fn ack_handler(&self, text: &String, ctx: &mut <Self as Actor>::Context) -> JsonResult<()> {
+        let val: Value = serde_json::from_str(text)?;
+        if val["kind"] == "enq" {
+            let ack = json!({ "type": "ack", "timestamp": val["timestamp"]});
+            ctx.text(ack.to_string());
+        } else if val["kind"] == "ack" {
+            assert!(val["timestamp"].is_u64());
+            let now = get_timestamp_ns();
+            let then = val["timestamp"].as_u64().unwrap();
+            let delta = now - then;
+            ctx.text(json!({"kind": "latency", "latency": delta}).to_string());
+
+            let ms = delta as f64 / 1_000_000.0;
+            println!("delta: {}ms", ms);
+        } else {
+            println!("Unknown message: {}", text);
+        }
+        Ok(())
+    }
+
 }
 
 #[actix_web::main]
